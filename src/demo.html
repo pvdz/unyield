@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>UnYield, from ES6 generators to vanilla ES5, by Peter van der Zee</title>
+    <!-- scripts in the <head> such crazy -->
+    <script src="../lib/uni.js"></script>
+    <script src="../lib/tok.js"></script>
+    <script src="../lib/par.js"></script>
+    <script src="unyield.js"></script>
+    <script>
+      function compile() {
+        B.textContent = unyield(A.textContent);
+      }
+      function check(e) {
+        e.style.backgroundColor = '#FFEA80';
+        Par.parse(e.textContent, {saveTokens:true,createBlackStream:true});
+        e.style.backgroundColor = 'white';
+      }
+    </script>
+  </head>
+  <body>
+    <h1>UnYield</h1>
+    <h2>Converts ES6 <code>yield</code> to ES5 semantics</h2>
+    input (<b>edit me</b>). <i>If <span style="font-weight:bold; color:#df8a00;">orange</span>, your code contains a syntax error. If your code is correct, please report this <a href="http://github.com/qfox/zeparser2/issues/">here</a></i>.
+    <hr>
+    <script id=A contenteditable type="example" style="display:block; white-space:pre; font-family:monospace;" onkeyup="check(A);compile();check(B);">
+  function* g() {
+    yield;
+  }
+    </script>
+    <hr>
+    output (copy me). <i>If <span style="font-weight:bold; color:#df8a00;">orange</span>, compiled code contains a syntax error (that's a bug, feel free to report this <a href="http://github.com/qfox/unyieldjs/issues/">here</a> :)</i>
+    <hr>
+    <script id=B type="output" style="display:block; white-space:pre; font-family:monospace;" contenteditable></script>
+    <script>compile();</script>
+    <hr>
+
+    <p>Tests: <a href="http://unyield.qfox.nl/tests.html">http://unyield.qfox.nl/tests.html</a></p>
+    <p>Known wontfixes: <code>finally</code>, <code>catch</code> var stuff, ASI related transformation bugs, multiple yields in the same expression (same statement is fine), any <code>yield</code> inside <code>eval</code>.</p>
+    <p>In fact, it's not likely this project will be worked on.</p>
+    <p>This is a nearly complete "clean-room" implementation of translating generators or yield to ES5, allowing you to use generators in current browsers. For more solid, supported solutions see Facebook's <a href="http://facebook.github.io/regenerator/">Regenerator</a> or Google's <a href="https://github.com/google/traceur-compiler">Traceur</a>.</p>
+    <footer>(c) 2014, Peter van der Zee, <a href="http://twitter.com/kuvos/">@kuvos</a>, <a href="http://qfox.nl/">qfox.nl</a>. Check <a href="http://github.com/qfox/unyield/">this project on github</a></footer>
+  </body>
+</html>

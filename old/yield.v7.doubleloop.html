@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Yield</title>
+  </head>
+  <body>
+    <script src="uni.js"></script>
+    <script src="tok.js"></script>
+    <script src="par.js"></script>
+
+    input:
+    <hr>
+    <script id=A type="example" style="display:block; white-space:pre; font-family:monospace;">
+      function* g(){
+        a = yield y ;
+      }
+    </script>
+    <hr>
+    output:
+    <hr>
+    <script id=B type="output" style="display:block; white-space:pre; font-family:monospace;" contenteditable></script>
+    <script src="yield.js"></script>
+    <script>
+      B.textContent = yieldify(A.textContent);
+    </script>
+    <script type="todo">
+  yield x;
+  var x = yield y;
+  var x = 5 + yield y;
+  var x = 5 + (yield y) + z;
+  f(yield y);
+  var x = f() + g(yield y);
+</script>
+  </body>
+</html>

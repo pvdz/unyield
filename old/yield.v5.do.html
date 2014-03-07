@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Yield</title>
+  </head>
+  <body>
+    <script src="uni.js"></script>
+    <script src="tok.js"></script>
+    <script src="par.js"></script>
+
+    input:
+    <hr>
+    <script id=A type="example" style="display:block; white-space:pre; font-family:monospace;">
+      var o = {foo:1, bar:3, 15:"cant"};
+      function* f(){
+        var x = 5;
+        do {
+          console.log(key);
+        } while (++x < 10);
+        //console.log(x+y);
+        //return "the end";
+      }
+      //var g = f();
+      //console.log(g.next());
+      //console.log(g.next(10));
+    </script>
+    <hr>
+    output:
+    <hr>
+    <script id=B type="output" style="display:block; white-space:pre; font-family:monospace;" contenteditable></script>
+
+
+    <script>
+      var p = Par.parse(A.textContent, {saveTokens:true,createBlackStream:true});
+      var wlist = p.tok.tokens;
+      var blist = p.tok.black;
+      for (var i=0; i<blist.length; ++i) {
+        var token = blist[i];
+        if (token.isVarToken) {
+          if (token.isForEach) {
+            // for (ONE;TWO;THREE) x;
+            // for (ONE;TWO;THREE) { x; }
+            // - put ONE before `for`
+            // - put TWO inside header
+            // - put THREE at the end of for-statement
+            // ONE;for(TWO) { x; THREE; }
+
+            var start = token.lhp.white; // skip `for(`
+            var semi1 = token.semi1.white;
+            var semi2 = token.semi2.white;
+            var end = token.rhp.white;
+
+            var one = wlist.slice(start+1, semi1).map(function(o){ var v = o.value;o.value = ''; return v; }).join('');
+            wlist[semi1].value = '';
+            var two = wlist.slice(semi1+1, semi2).some(function(o){ return o.black; });
+            wlist[semi2].value = '';
+            var three = wlist.slice(semi2+1, end).map(function(o){ var v = o.value;o.value = ''; return v; }).join('');
+
+            token.value = '{'+one+';'+'while';
+            if (!two) token.lhp.value += 'true';
+            var target = blist[token.stmtEnd.black-1];
+            if (blist[token.rhp.black+1].value === '{') {
+              target.value = three+';}'+target.value;
+            } else {
+              token.rhp.value += '{';
+              token.stmtEnd.value = token.stmtEnd.value+(token.stmtEnd.value===';'?'':';')+three+';}}';
+            }
+
+            i = token.rhp.white;
+          } else if (token.isForIn) {
+            // for (var key in (rhs)) stmt
+            // for ((lhs) in (expr)) stmt
+
+            // https://gist.github.com/qfox/9121615
+            // for token has .inToken and .lhp .rhp, so we can just slice them out
+            // we could re-use the var if any, but let's leave that for the v2 :)
+
+            var lhp = token.lhp.white;
+            var inw = token.inToken.white;
+            var rhp = token.rhp.white;
+
+
+            token.value = '';
+            wlist[lhp].value = '';
+            if (blist[token.lhp.black+1].value === 'var') {
+              // drop `var` to make sure lhs is expression
+              var useVar = true;
+              blist[token.lhp.black+1].value = '';
+            }
+            var lhs = wlist.slice(lhp+1, inw).map(function(o){ var v = o.value; o.value = ''; return v; }).join('');
+            wlist[inw].value = '';
+            var rhs = wlist.slice(inw+1, rhp).map(function(o){ var v = o.value; o.value = ''; return v; }).join('');
+            wlist[rhp].value = '';
+
+            var prefix = '_\u03b3_';
+
+            token.value =
+              (useVar?'var':'')+lhs+';\n'+
+              'var '+prefix+'key, '+prefix+'keys = [], '+prefix+'expro = ('+rhs+'), '+prefix+'tkey;\n'+
+              'for ('+prefix+'key in '+prefix+'expro) '+prefix+'keys.push('+prefix+'key);\n'+
+              'while ('+prefix+'keys.length)\n' +
+                'if (' +
+                  prefix+'expro.hasOwnProperty('+prefix+'tkey = '+prefix+'keys.shift())' +
+                  // this looks a big convoluted but prevents us having to block-wrap the statement :)
+                  ' && !void('+lhs+' = '+prefix+'tkey)' +
+                ')\n';
+                // original statement goes here, should still work as before
+          } else {
+            console.warn('unknown for-loop?');
+          }
+        } else if (token.isDo) {
+          // fairly simple
+          // do block while (exprs);
+          // block while(exprs) block
+
+          // we dont need the `do` anymore. we'll need to wrap the result in a block though
+          token.value = '{';
+          // leave block as is. we'll _copy_ it after the while too
+          var block = wlist.slice(token.lhc.white, token.rhc.white).map(function(o){ return o.value; }).join('');
+          // replace the _mandatory_ semi token with the block value
+          blist[token.rhp.black+1].value = block +
+            // and close the outer-block to make sure the whole thing remains one statement
+            '}';
+
+          console.log('do it');
+        }
+      }
+
+      B.textContent = wlist.map(function(o){ return o.value; }).join('');
+    </script>
+
+    <script>
+      meh
+      // TODO: if (foo) { yield x; } will break the block
+      var p = Par.parse(A.textContent, {saveTokens:true,createBlackStream:true});
+      console.log(p.tok.tokenCountAll);
+      console.log(p.tok.tokens);
+
+      var wlist = p.tok.tokens;
+      var blist = p.tok.black;
+
+      var yields = [];
+      for (var i=0, len=blist.length; i<len; ++i) {
+        var token = blist[i];
+        if (token.isYield) {
+          yields.push(token);
+        }
+      }
+
+      for (i=0, len=yields.length; i<len; ++i) {
+        var currentYield = yields[i];
+        var func = currentYield.funcToken;
+
+        // we will slice out the yield+expr
+        // [A        [B   C]       D]
+        // [stmstart [yield] stmtend]
+        var stmtStart = currentYield.statementStart.white;
+        var yieldStart = currentYield.white;
+        var yieldEnd = currentYield.exprEnd.white;
+        var stmtEnd = currentYield.statementStart.statementEnd.white;
+
+        if (blist[func.black+1].value === '*') blist[func.black+1].value = '';
+
+        var funcs = [[], []];
+        var vars = [];
+
+        // gather all tokens from this function
+        for (var j=func.lhc.white+1; j<func.rhc.white; ++j) {
+          var t = wlist[j];
+
+          // TODO: function declarations have the same problem, require more intensive rewrite
+          if (t.isVarKeyword) {
+            vars.push.apply(vars, t.vars);
+            t.value = '';
+          }
+
+          var cut = currentYield.white;
+          if (currentYield.exprEnd) cut = currentYield.exprEnd.white;
+
+          if (j === yieldStart) {
+            // yield (whatever variety) becomes a return, possibly with expr
+            funcs[0].push('return');
+            // in the second function it is replaced entirely with a var
+            funcs[1].push('yieldValue');
+          } else if (j > yieldStart && j <= yieldEnd) {
+            // yield expression, if any
+            funcs[0].push(t.value);
+          } else if (j <= stmtStart) {
+            // anything before the yield statement goes into the first function
+            // the yield statement mostly goes into the second statement
+            // the yield itself is sliced out in the prev 2 conditions
+            funcs[0].push(t.value);
+          } else {
+            funcs[1].push(t.value);
+          }
+
+          // make sure the "yield return" and "yield statement" are both properly closed
+          if (j === yieldEnd) funcs[0].push(';');
+          if (j === stmtEnd) funcs[1].push(';');
+
+          t.value = '';
+        }
+
+        if (vars.length) {
+          func.lhc.value += 'var '+vars.join(', ')+';\n';
+        }
+
+        func.lhc.value += ('\n'+
+          '\t\tvar that = this;\n' +
+          '\t\tvar started = false;\n' +
+          '\t\tvar finished = false;\n\n' +
+          '\t\tfunction f1(){'+funcs[0].join('')+'}\n\n' +
+          '\t\tfunction f2(yieldValue){'+funcs[1].join('')+'}\n\n' +
+          '\t\treturn {\n' +
+          '\t\t\tnext: function(v){\n' +
+          '\t\t\t\tif (!started) {\n' +
+          '\t\t\t\t\tstarted = true;\n' +
+          '\t\t\t\t\tif (v) throw "cant send value before start";\n' +
+          '\t\t\t\t\treturn {value:f1.call(that), done:finished};\n' +
+          '\t\t\t\t}\n' +
+          '\t\t\t\tif (!finished) {\n' +
+          '\t\t\t\t\tfinished = true;\n' +
+          '\t\t\t\t\treturn {value:f2.call(that, v), done:finished};\n' +
+          '\t\t\t\t}\n'+
+          '\t\t\t\tthrow \'unable to next, iterator finished\';\n' +
+          '\t\t\t},\n' +
+          '\t\t};\n'
+        ).replace(/\t/g,'  ');
+
+      }
+
+
+      B.textContent = p.tok.tokens.map(function(o){ return o.value; }).join('');
+    </script>
+
+    <script type="todo">
+      yield x;
+      var x = yield y;
+      var x = 5 + yield y;
+      var x = 5 + (yield y) + z;
+      f(yield y);
+      var x = f() + g(yield y);
+    </script>
+
+  </body>
+</html>

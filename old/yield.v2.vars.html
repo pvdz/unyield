@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Yield</title>
+  </head>
+  <body>
+    <script src="uni.js"></script>
+    <script src="tok.js"></script>
+    <script src="par.js"></script>
+
+    input:
+    <hr>
+    <script id=A type="example" style="display:block; white-space:pre; font-family:monospace;">
+      function a(){ console.log('a'); }
+      function b(){ console.log('b'); }
+      function* foo(){
+        var x = 'hello world';
+        yield(0);
+        console.log(x);
+      }
+    </script>
+    <hr>
+    output:
+    <hr>
+    <script id=B type="output" style="display:block; white-space:pre; font-family:monospace;" contenteditable></script>
+
+    <script>
+      var p = Par.parse(A.textContent, {saveTokens:true,createBlackStream:true});
+      console.log(p.tok.tokenCountAll);
+      console.log(p.tok.tokens);
+
+      var wlist = p.tok.tokens;
+      var blist = p.tok.black;
+
+      var yields = [];
+      for (var i=0, len=blist.length; i<len; ++i) {
+        var token = blist[i];
+        if (token.isYield) {
+          yields.push(token);
+        }
+      }
+
+      console.log(yields);
+      for (i=0, len=yields.length; i<len; ++i) {
+        var currentYield = yields[i];
+        var func = currentYield.funcToken;
+        if (blist[func.black+1].value === '*') blist[func.black+1].value = '';
+
+        var funcs = [[], []];
+        var vars = [];
+
+        // gather all tokens from this function
+        for (var j=func.lhc.white+1; j<func.rhc.white; ++j) {
+          var t = wlist[j];
+
+          // if a token is `var` keyword, collect those variables
+          // they are to be hoisted
+          // TODO: function declarations have the same problem, require more intensive rewrite
+
+          if (t.isVarKeyword) {
+            vars.push.apply(vars, t.vars);
+            t.value = '';
+          }
+
+          if (j < currentYield.white) {
+            funcs[0].push(t.value);
+          } else if (j > currentYield.white) {
+            funcs[1].push(t.value);
+          }
+          t.value = '';
+        }
+
+        if (vars.length) {
+          func.lhc.value += 'var '+vars.join(', ')+';\n';
+        }
+
+        func.lhc.value += (
+          '\n\t\tvar started = false;\n'+
+          '\t\tvar finished = false;\n\n' +
+          '\t\tfunction f1(){'+funcs[0].join('')+'}\n\n' +
+          '\t\tfunction f2(){'+funcs[1].join('')+'}\n\n' +
+          '\t\treturn {\n' +
+          '\t\t\tnext: function(){\n' +
+          '\t\t\t\tif (!started) {\n' +
+          '\t\t\t\t\tstarted = true;\n' +
+          '\t\t\t\t\tf1();\n' +
+          '\t\t\t\t} else if (!finished) {\n' +
+          '\t\t\t\t\tfinished = true;\n' +
+          '\t\t\t\t\tf2();\n' +
+          '\t\t\t\t} else {\n' +
+          '\t\t\t\t\tthrow \'unable to next, iterator finished\';\n' +
+          '\t\t\t\t}\n' +
+          '\t\t\t},\n' +
+          '\t\t};\n'
+        ).replace(/\t/g,'  ');
+        /*
+         var started = false;
+         var finished = false;
+         function begin() {
+         a();
+         }
+         function rest() {
+         b();
+         }
+         return {
+         next: function(){
+         if (!started) {
+         started = true;
+         begin();
+         } else if (!finished) {
+         rest();
+         finished = true;
+         } else {
+         throw 'nope';
+         }
+         }
+         };
+
+         */
+
+
+      }
+
+
+      B.textContent = p.tok.tokens.map(function(o){ return o.value; }).join('') + '\nvar g = foo(); g.next(); g.next(); g.next();';
+    </script>
+
+  </body>
+</html>

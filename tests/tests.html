@@ -1,0 +1,2747 @@
+<script src="../lib/uni.js"></script>
+<script src="../lib/tok.js"></script>
+<script src="../lib/par.js"></script>
+<script src="../src/unyield.js"></script>
+
+<pre style="display:none;"></pre>
+<style>
+  .test { overflow: hidden; float: left; }
+  .test.open { height: auto; float: none; clear: left; }
+
+  .test>h1 { margin: 2px; padding: 0; line-height: 25px;  cursor: pointer; }
+  .test>script { border-bottom: 2px solid black; padding-bottom: 15px; white-space: pre; }
+  .test>script, .test>pre { font-family: monospace; }
+
+  .test>div, .test>script, .test>pre, .test>hr, .test>h1>span { display: none; }
+  .test.open>div, .test.open>script, .test.open>pre, .test.open>hr, .test.open>h1>span { display: block; }
+
+  h1 { background-color: tomato; font-size: 14px; font-weight: normal; }
+  h1>span { font-size: 12px; }
+  .test.open>h1 { font-size: 25px; font-weight: bold; }
+  h1.ok { background-color: lightgreen; }
+  h1.disabled { background-color: orange; }
+</style>
+<script>
+  window.addEventListener('click', function(e){
+    if (e.target.nodeName === 'H1' && e.target.parentNode.className.indexOf('test') >= 0) {
+      if (e.target.parentNode.className.indexOf('open') >= 0) e.target.parentNode.className = e.target.parentNode.className.replace(/ ?open ?/, '');
+      else e.target.parentNode.className += ' open';
+    }
+  });
+
+  var passed = 0;
+  var failed = 0;
+  var disabled = 0;
+
+  function oops(script, output, cls, msg, results) {
+    feedback(script, output, cls, msg, results, true);
+  }
+  function feedback(script, output, cls, msg, results, failed) {
+    var e = document.createElement('div');
+    var dmsg = '';
+    if (failed) {
+      console.log(arguments);
+      dmsg = ' <span>'+((failed&&results[results.length-1].replace(/&/g,'&amp;').replace(/</g, '&lt;'))||'')+'</span>';
+      if (cls === 'disabled') ++window.disabled;
+      else ++window.failed;
+    } else {
+      ++window.passed;
+    }
+    e.innerHTML = '<h1 class="'+cls+'">'+script.getAttribute('type')+dmsg+'</h1><div><b>'+(msg||'')+'</b></div>';
+    document.body.replaceChild(e, script);
+    e.className = 'test';
+    e.appendChild(script);
+    var o = document.createElement('pre');
+    o.innerHTML = !results ? '&lt;no output&gt;' : ('[\n\t'+results.join(',\n\t').replace(/&/g,'&amp;').replace(/</g, '&lt;')+'\n]\n');
+    e.appendChild(o);
+    e.appendChild(document.createElement('hr'));
+    var pre = document.createElement('pre');
+    pre.textContent = output;
+    pre.setAttribute('contenteditable', '');
+    e.appendChild(pre);
+    e.appendChild(document.createElement('hr'));
+  }
+
+  function single(script){
+    var actual = [];
+    var desc = script.getAttribute('type');
+    var input = script.textContent;
+    console.warn('one: '+desc);
+    if (script.hasAttribute('disabled')) {
+      console.warn('Test disabled');
+      actual.push('<Test disabled>');
+      return oops(script, '', 'disabled', 'Test is disabled', actual);
+    }
+
+    var expecting = undefined;
+    var send = undefined;
+    var args = undefined;
+    var context = undefined;
+    var g = undefined;
+
+    var output = unyield(input);
+    try {
+      eval(output);
+    } catch (e) {
+      actual.push('<Unable to compile translation ['+e+']>');
+      var msg = 'Unable to compile translation. '+e;
+      console.error(msg);
+      return oops(script, output, 'compilation', msg, actual);
+    }
+
+    if (typeof expected !== 'undefined') {
+      console.warn('Using `expected` instead of `expecting`');
+      actual.push('<Using `expected` instead of `expecting`>');
+      return oops(script, '', '', 'Using `expected` instead of `expecting`', actual);
+    }
+    if (typeof expecting === 'undefined') {
+      console.warn('`expecting` is not defined');
+      actual.push('<`expecting` is not defined>');
+      return oops(script, '', '', '`expecting` is not defined', actual);
+    }
+    if (typeof g !== 'function') {
+      var msg = 'Generator `g` not defined, different name?';
+      actual.push('<Generator g not defined ['+e+']>');
+      console.error(msg);
+      return oops(script, output, 'g', msg, actual);
+    }
+
+    context = context || this;
+    args = args || [];
+    send = send || [];
+    expecting = expecting || [];
+
+    try {
+      g();
+    } catch (e) {
+      actual.push('<Failed simple initialization ['+e+']>');
+      console.error('Failed simple initialization');
+      console.error(e);
+      return oops(script, output, 'run', 'Unable to invoke generator. '+e, actual);
+    }
+
+    try {
+      var f = g.apply(context, args);
+    } catch (e) {
+      actual.push('<Failed g.apply ['+e+']>');
+      console.error('Failed g.apply');
+      return oops(script, output, 'run', 'Unable to .apply generator. '+e, actual);
+    }
+
+    for (var i=0; i<expecting.length; ++i) {
+      try {
+        if (i in send) var v = f.next(send[i]);
+        else var v = f.next();
+      } catch (e) {
+        var msg = 'Failed g.next: '+e;
+        console.error();
+        actual.push('<threw an error ['+e+']>');
+        return oops(script, output, 'next', msg, actual);
+      }
+      console.log(i,'yielded:', v);
+
+      if (typeof v !== 'object') {
+        var msg = '.next() should return object ['+i+']['+v+']';
+        actual.push('<did not return an object ['+(typeof v)+']['+v+']>');
+        console.error(msg);
+        return oops(script, output, 'return', msg, actual);
+      }
+      else {
+        if (typeof v.done !== 'boolean') {
+          var msg = '.next().done should b boolean ['+i+']['+v.done+']';
+          console.error(msg);
+          actual.push('<done is not a boolean ['+(typeof v.done)+']['+v.done+']>');
+          return oops(script, output, 'done', msg, actual);
+        }
+        if (v.value !== expecting[i]) {
+          var msg = 'Failed next().value ['+i+']['+v.value+' !== '+expecting[i]+']';
+          actual.push('<value not as expected ['+i+'][v='+ v.value+' !== e='+expecting[i]+']>');
+          console.error(msg);
+          return oops(script, output, 'expecting', msg, actual);
+        }
+      }
+
+      if (v.value === undefined) actual.push('undefined');
+      if (v.value === null) actual.push('null');
+      else actual.push(typeof v.value === 'string' ? '"'+ v.value+'"': v.value);
+    }
+    try {
+      var noThrow = false;
+      f.next();
+      noThrow = true;
+    } catch (e) {}
+    if (noThrow) {
+      var msg = '.next() should throw now ['+expecting.length+']';
+      actual.push('<did not finish when expected>');
+      console.error(msg);
+      return oops(script, output, 'throw', msg, actual);
+    }
+
+    console.log('');
+
+    feedback(script, output, 'ok', 'Pass', actual);
+  }
+  window.onload = function(){
+    var scripts = document.querySelectorAll('script[type]');
+    for (var i=0; i<scripts.length; ++i) {
+      var script = scripts[i];
+      single(script);
+    }
+
+    console.log('Pass: '+passed+', failed: '+failed+', disabled: '+disabled);
+  };
+</script>
+<script type="simple">
+  var expecting = [undefined, undefined];
+  function* g(){
+    yield;
+  }
+</script>
+<script type="simpleish">
+  // the space after yield was causing a problem at some point ;)
+  var expecting = [undefined, undefined];
+
+  function* g(){
+    yield ;
+  }
+</script>
+<script type="single step, returns 1">
+  var expecting = [undefined, 1];
+  function* g(){
+    yield;
+    return 1;
+  }
+</script>
+<script type="yield arg">
+  var expecting = [1,2];
+  function* g(){
+    if (true) {
+      yield 1;
+    }
+    return 2;
+  }
+</script>
+<script type="yield return">
+  var send = [,1];
+  var expecting = [undefined, 1];
+  function* g(){
+    var x = yield;
+    return x;
+  }
+</script>
+<script type="yield return yield">
+  var send = [,1];
+  var expecting = [undefined, 1];
+  function* g(){
+    return yield;
+  }
+</script>
+<script type="yield complex expression">
+  var send = [,1];
+  var expecting = [13,1];
+  function* g(){
+    return yield 10+3;
+  }
+</script>
+<script type="condition, passing">
+  var expecting = [1, 2];
+  function* g(){
+    if (true) {
+      yield 1;
+    }
+    return 2;
+  }
+</script>
+<script type="condition, failing">
+  var expecting = [2];
+  function* g(){
+    if (false) {
+      yield 1;
+    }
+    return 2;
+  }
+</script>
+<script type="yield as condition, passing">
+  var send = [,true];
+  var expecting = [undefined,1];
+  function* g(){
+    if (yield) {
+      return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="yield as condition, failing">
+  var send = [,false];
+  var expecting = [undefined,2];
+  function* g(){
+    if (yield) {
+      return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="yield with argument as condition">
+  var send = [,false];
+  var expecting = [1,3];
+  function* g(){
+    if (yield 1) {
+      return 2;
+    }
+    return 3;
+  }
+</script>
+<script type="generator args">
+  var args = [1];
+  var expecting = [undefined,1];
+  function* g(x){
+    yield;
+    return x;
+  }
+</script>
+<script type="double loop, inner yield">
+  expecting = ['abc', 'abcdc', 'abcdcdebef'];
+
+  var x = 3;
+  var y = 3;
+  var s = '';
+  function* g(){
+    s += 'a';
+    while (--x > 0) {
+      s += 'b';
+      while (--y > 0) {
+        s += 'c';
+        yield s;
+        s += 'd';
+      }
+      s += 'e';
+    }
+    return s + 'f';
+  }
+</script>
+<script type="double loop, inner yield, inner loop resets">
+  expecting = ['abc', 'abcdc', 'abcdcdebc', 'abcdcdebcdc', 'abcdcdebcdcdef'];
+
+  var x = 0;
+  var y = 0;
+  var s = '';
+  function* g(){
+    s += 'a';
+    while (++x < 3) {
+      y = 0;
+      s += 'b';
+      while (++y < 3) {
+        s += 'c';
+        yield s;
+        s += 'd';
+      }
+      s += 'e';
+    }
+    return s + 'f';
+  }
+</script>
+<script type="double loop, outer yield">
+  expecting = ['ab', 'abcddeb', 'abcddebcef'];
+
+  var x = 3;
+  var y = 3;
+  var s = '';
+  function* g(){
+    s += 'a';
+    while (--x > 0) {
+      s += 'b';
+      yield s;
+      s += 'c';
+      while (--y > 0) {
+        s += 'd';
+      }
+      s += 'e';
+    }
+    return s + 'f';
+  }
+</script>
+<script type="generator context">
+  var context = {a:1, b:2};
+  var send = [,2];
+  var expecting = [1, 3];
+  function* g(){
+    this.b = yield this.a;
+    return this.a + this.b;
+  }
+  // g.next(2); == 1
+  // g.next(); == 3
+</script>
+<script type="simple while loop">
+  var expecting = [0, 1, 2];
+
+  var x = 0;
+  var y = 0;
+  function* g(){
+    while (++x < 3) {
+      yield y++;
+    }
+    return y;
+  }
+</script>
+<script type="simple for loop no-var">
+  var expecting = [0, 1, 2, 3];
+
+  var x = 0;
+  var y = 0;
+  function* g(){
+    for (x=0; x<3; ++x) {
+      yield y++;
+    }
+    return y;
+  }
+</script>
+<script type="simple for loop var">
+  var expecting = [0, 1, 2, 3];
+
+  var y = 0;
+  function* g(){
+    for (var x=0; x<3; ++x) {
+      yield y++;
+    }
+    return y;
+  }
+</script>
+<script type="for-in, outside yield before">
+  var expecting = [undefined, ' '];
+
+  function* g() {
+    yield;
+    var s = ' a b 15 ';
+    var o = {a:true,b:true,15:true};
+    for (var key in o) {
+       s = s.replace(' '+key+' ', ' ');
+    }
+    return s;
+  }
+</script>
+<script type="for-in, outside yield after">
+  var expecting = [undefined, ' '];
+
+  function* g() {
+    var s = ' a b 15 ';
+    var o = {a:true,b:true,15:true};
+    for (var key in o) {
+       s = s.replace(' '+key+' ', ' ');
+    }
+    yield;
+    return s;
+  }
+</script>
+<script type="simple for-in loop no-var">
+  var expecting = ['a', 'b', 3];
+
+  var o = {a:1, b:2};
+  var y = 0;
+  function* g(){
+    var key;
+    for (key in o) {
+      yield key;
+      y += o[key];
+    }
+    return y;
+  }
+</script>
+<script type="simple for-in loop var">
+  var expecting = ['a', 'b', 3];
+
+  var o = {a:1, b:2};
+  var y = 0;
+  function* g(){
+    for (var key in o) {
+      yield key;
+      y += o[key];
+    }
+    return y;
+  }
+</script>
+<script type="for-in yield rhs">
+  var o = {1:1, 2:2};
+  var send = [,o];
+  var expecting = [undefined, 3];
+
+  var y = 0;
+  function* g(){
+    var key;
+    for (var key in yield) {
+      y += parseInt(key, 10);
+    }
+    return y;
+  }
+</script>
+<script type="for-in yield rhs with arg">
+  var o = {1:1, 2:2};
+  var send = [,o];
+  var expecting = [15, 3];
+
+  var y = 0;
+  function* g(){
+    var key;
+    for (var key in yield 15) {
+      y += parseInt(key, 10);
+    }
+    return y;
+  }
+</script>
+<script type="if no-block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) return yield 2;
+  }
+</script>
+<script type="if block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) {
+      return yield 2;
+    }
+  }
+</script>
+<script type="if-else no-block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) return yield 2;
+    else return 5;
+  }
+</script>
+<script type="if block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) {
+      return yield 2;
+    } else {
+      return 5;
+    }
+  }
+</script>
+<script type="else no-block">
+  var obj = {};
+  var send = [,obj];
+  var expecting = [2, obj];
+
+  function* g(){
+    if (false) {
+      return 1;
+    } else return yield 2;
+  }
+</script>
+<script type="else block">
+  var obj = {};
+  var send = [,obj];
+  var expecting = [2, obj];
+
+  function* g(){
+    if (false) {
+      return 1;
+    } else {
+      return yield 2;
+    }
+  }
+</script>
+<script type="if-then-elseif block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) {
+      return yield 2;
+    } else if (false) {
+      return 3;
+    }
+  }
+</script>
+<script type="if-then-elseif no-block">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) return yield 2;
+    else if (false) return 3;
+  }
+</script>
+<script type="double if yield">
+  var expecting = [1, 2, 3];
+
+  function* g(){
+    if (true) yield 1;
+    if (true) yield 2;
+    return 3;
+  }
+</script>
+<script type="double nested if yield">
+  var expecting = [1, 2, 3];
+
+  function* g(){
+    if (true) {
+      yield 1;
+      if (true) yield 2;
+    }
+    return 3;
+  }
+</script>
+<script type="if-else double yield">
+  var send = [,3];
+  var expecting = [2, 4];
+
+  function* g(){
+    if (true) {
+      yield 2;
+    } else {
+      yield 3;
+    }
+    return 4;
+  }
+</script>
+<script type="if-then-elseif block double yield">
+  var send = [,3];
+  var expecting = [2, 4];
+
+  function* g(){
+    if (true) {
+      yield 2;
+    } else if (false) {
+      yield 3;
+    }
+    return 4;
+  }
+</script>
+<script type="if return yield">
+  var send = [,2];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    if (true) return yield;
+  }
+</script>
+<script type="else return yield">
+  var send = [,2];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    if (false) return 5;
+    else return yield;
+  }
+</script>
+<script type="ifelse double return yield">
+  var send = [,2];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    if (false) return yield;
+    else return yield;
+  }
+</script>
+<script type="if-then-elseif return double yield">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) {
+      return yield 2;
+    } else if (false) {
+      return yield 3;
+    }
+  }
+</script>
+<script type="if-then-elseif no-block return double yield">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) return yield 2;
+    else if (false) return yield 3;
+  }
+</script>
+<script type="if-then-elseif-else block return double yield">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) {
+      return yield 2;
+    } else if (false) {
+      return yield 3;
+    } else {
+      return 5;
+    }
+  }
+</script>
+<script type="if-then-elseif-else no-block return double yield">
+  var send = [,3];
+  var expecting = [2, 3];
+
+  function* g(){
+    if (true) return yield 2;
+    else if (false) return yield 3;
+    else return 5;
+  }
+</script>
+<script type="elseif yield return double yield">
+  var send = [,true];
+  var expecting = [2, true];
+
+  function* g(){
+    if (true) return yield 2;
+    else if (yield) return 3;
+    else return 5;
+  }
+</script>
+<script type="elseif yield true return double yield">
+  var send = [,true];
+  var expecting = [undefined, 3];
+
+  function* g(){
+    if (false) return yield 2;
+    else if (yield) return 3;
+    else return 5;
+  }
+</script>
+<script type="elseif yield false return double yield">
+  var send = [,false];
+  var expecting = [undefined, 5];
+
+  function* g(){
+    if (false) return yield 2;
+    else if (yield) return 3;
+    else return 5;
+  }
+</script>
+<script type="nasty double if else, 1">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    yield;
+    if (true)
+      if (true) return 1;
+      else return 2;
+    else return 3;
+    return 4;
+  }
+</script>
+<script type="nasty double if else, 2">
+  var expecting = [undefined, 4];
+
+  function* g() {
+    if (true)
+      if (true) yield;
+      else return 2;
+    else return 3;
+    return 4;
+  }
+</script>
+<script type="nasty double if else, 3">
+  var expecting = [undefined, 4];
+
+  function* g() {
+    if (true)
+      if (false) return 1;
+      else yield;
+    else return 3;
+    return 4;
+  }
+</script>
+<script type="nasty double if else, 4">
+  var expecting = [undefined, 4];
+
+  function* g() {
+    if (false)
+      if (false) return 1;
+      else return 2;
+    else yield;
+    return 4;
+  }
+</script>
+<script type="loop break before">
+  var expecting = [5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      break;
+      yield;
+    }
+    return 5;
+  }
+</script>
+<script type="loop break after">
+  var expecting = [2, 5];
+
+  function* g(){
+    var x = 3;
+    while (--x > 0) {
+      yield x;
+      break;
+    }
+    return 5;
+  }
+</script>
+<script type="loop continue before">
+  var expecting = [5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      continue;
+      yield;
+    }
+    return 5;
+  }
+</script>
+<script type="loop continue after">
+  var expecting = [undefined, undefined, 5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      yield;
+      continue;
+    }
+    return 5;
+  }
+</script>
+<script type="double loop continue 1">
+  var expecting = [5];
+
+  function* g(){
+    var x = 3;
+    while (--x > 0) {
+      continue;
+      var y = 3;
+      while (--y > 0) {
+        yield;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop continue 2">
+  var expecting = [5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      var y = 0;
+      while (++y < 3) {
+        continue;
+        yield;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop continue 3">
+  var expecting = [undefined, undefined, undefined, undefined, 5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      var y = 0;
+      while (++y < 3) {
+        yield;
+        continue;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop continue 4">
+  var expecting = [undefined, undefined, undefined, undefined, 5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      var y = 0;
+      while (++y < 3) {
+        yield;
+      }
+      continue;
+    }
+    return 5;
+  }
+</script>
+<script type="double loop break 1">
+  var expecting = [5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      break;
+      var y = 0;
+      while (++y < 3) {
+        yield;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop break 2">
+  var expecting = [5];
+
+  function* g(){
+    var x = 0;
+    while (++x < 3) {
+      var y = 0;
+      while (++y < 3) {
+        break;
+        yield;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop break 3">
+  var expecting = [undefined, undefined, 5];
+
+  function* g(){
+    var x = 3;
+    while (--x > 0) {
+      var y = 3;
+      while (--y > 0) {
+        yield;
+        break;
+      }
+    }
+    return 5;
+  }
+</script>
+<script type="double loop break 4">
+  var expecting = [undefined, undefined, 5];
+
+  function* g(){
+    var x = 3;
+    while (--x > 0) {
+      var y = 3;
+      while (--y > 0) {
+        yield;
+      }
+      break;
+    }
+    return 5;
+  }
+</script>
+<script type="double yield">
+  var expecting = [undefined, undefined, undefined];
+  function* g() {
+    yield;
+    yield;
+  }
+</script>
+<script type="nested yield" disabled>
+  // dunno if this is legal
+  var expecting = [undefined, undefined, undefined];
+
+  function* g(){
+    yield yield;
+  }
+</script>
+<script type="chaining yield" disabled>
+  // dunno if this is legal
+  var send = [, 2, 3];
+  var expecting = [undefined, undefined, 5];
+
+  function* g(){
+    function a(n){
+      return function b(m){
+        return n + m;
+      };
+    }
+    return a(yield)(yield);
+  }
+</script>
+<script type="double yielded sub expression" disabled>
+  function* g() {
+    return (yield 1) + (yield 2);
+  }
+
+/*
+  function g(){
+    var v1, v2;
+    function f0() {
+      return 1;
+    }
+    function f1(v) {
+      v1 = v;
+      return 2;
+    }
+    return f2(v) {
+        v2 = v;
+        return v1+v2; // uups
+    }
+  */
+</script>
+<script type="double yield block nested">
+  var expecting = [undefined, undefined, undefined];
+
+  function* g(){
+    yield;
+    if (true) {
+      yield;
+    }
+  }
+</script>
+<script type="double yield inner block nested">
+  var expecting = [undefined, undefined, undefined];
+
+  function* g(){
+    if (true) {
+      yield;
+      if (true) {
+        yield;
+      }
+    }
+  }
+</script>
+<script type="double yield, nested yield statement with yield">
+  var send = [,true]
+  var expecting = [undefined, undefined, 20];
+
+  function* g(){
+    var x = 10;
+    if (yield) {
+      yield;
+      x = 20;
+    }
+    return x;
+  }
+</script>
+<script type="nested for-in, check key pairs, 1">
+  // while exact order can not be anticipated, all keys should be visited
+  // this test checks whether all (unique) key pairs are indeed removed
+  // from a string that contains them all.
+
+  var expecting = [undefined, undefined, undefined, ' '];
+
+  function* g() {
+    var s = ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 ';
+    var o1 = {a:true,b:true,15:true};
+    var o2 = {c:true,d:true,21:true};
+    for (var key1 in o1) {
+      yield;
+      for (var key2 in o2) {
+        s = s.replace(' '+key1+':'+key2+' ', ' ');
+      }
+    }
+    return s;
+  }
+</script>
+<script type="nested for in, each key only visited once">
+  // similar to above, but checks to make sure the inner or outer loop
+  // doesn't revisit all keys again (happens if keys cache is refreshed
+  // after a yield).
+
+  var expecting = [undefined, undefined, undefined, ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 '];
+
+  function* g() {
+    var s = ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 ';
+    var o1 = {a:true,b:true,15:true};
+    var o2 = {c:true,d:true,21:true};
+    for (var key1 in o1) {
+      yield;
+      for (var key2 in o2) {
+        s = s.replace(' '+key1+':'+key2+' ', ' ');
+      }
+    }
+    return s;
+  }
+</script>
+<script type="nested for-in, check key pairs, 2">
+  // while exact order can not be anticipated, all keys should be visited
+  // this test checks whether all (unique) key pairs are indeed removed
+  // from a string that contains them all.
+
+  var expecting = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ' '];
+
+  function* g() {
+    var s = ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 ';
+    var o1 = {a:true,b:true,15:true};
+    var o2 = {c:true,d:true,21:true};
+    for (var key1 in o1) {
+      for (var key2 in o2) {
+        yield;
+        s = s.replace(' '+key1+':'+key2+' ', ' ');
+      }
+    }
+    return s;
+  }
+</script>
+<script type="nested for-in, check key pairs, 3">
+  // while exact order can not be anticipated, all keys should be visited
+  // this test checks whether all (unique) key pairs are indeed removed
+  // from a string that contains them all.
+
+  var expecting = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ' '];
+
+  function* g() {
+    var s = ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 ';
+    var o1 = {a:true,b:true,15:true};
+    var o2 = {c:true,d:true,21:true};
+    for (var key1 in o1) {
+      for (var key2 in o2) {
+        s = s.replace(' '+key1+':'+key2+' ', ' ');
+        yield;
+      }
+    }
+    return s;
+  }
+</script>
+<script type="nested for-in, check key pairs, 4">
+  // while exact order can not be anticipated, all keys should be visited
+  // this test checks whether all (unique) key pairs are indeed removed
+  // from a string that contains them all.
+
+  var expecting = [undefined, undefined, undefined, ' '];
+
+  function* g() {
+    var s = ' a:c a:d a:21 b:c b:d b:21 15:c 15:d 15:21 ';
+    var o1 = {a:true,b:true,15:true};
+    var o2 = {c:true,d:true,21:true};
+    for (var key1 in o1) {
+      for (var key2 in o2) {
+        s = s.replace(' '+key1+':'+key2+' ', ' ');
+      }
+      yield;
+    }
+    return s;
+  }
+</script>
+<script type="with, yield before">
+  var expecting = [undefined, 5];
+
+  function* g() {
+    yield;
+    var o = {foo: 5};
+    with (o) {
+      return foo;
+    }
+  }
+</script>
+<script type="with, yield after">
+  var expecting = [5];
+
+  function* g() {
+    var o = {foo: 5};
+    with (o) {
+      return foo;
+    }
+    yield;
+  }
+</script>
+<script type="with arg">
+  var expecting = [5, undefined];
+
+  function* g() {
+    var o = {foo: 5};
+    with (o) {
+      yield foo;
+    }
+  }
+</script>
+<script type="with complex">
+  var expecting = [5, undefined];
+
+  function* g() {
+    var o = {foo: 5};
+    var p = {};
+    with (p,o) {
+      yield foo;
+    }
+  }
+</script>
+<script type="with after">
+  var expecting = [5, 6];
+  function* g() {
+    var o = {foo: 5, bar: 6};
+    with (o) {
+      yield foo;
+      return bar;
+    }
+  }
+</script>
+<script type="with(yield)">
+  var o = {foo: 5};
+  var send = [,o];
+  var expecting = [undefined, 5];
+
+  function* g() {
+    with (yield) {
+      return foo;
+    }
+  }
+</script>
+<script type="loop with">
+  var expecting = [undefined, 5];
+  function* g() {
+    var x = 5;
+    var o = {foo: 5};
+    while (true) {
+      with (o) {
+        yield;
+        x = foo; // f1 will not wrap this in a with, causing a problem
+      }
+      break;
+    }
+    return x;
+  }
+</script>
+<script type="loop with, double yield">
+  var o = {foo: 10};
+  var send = [,o];
+  var expecting = [undefined, undefined, 10];
+
+  function* g() {
+    var x = 5;
+    while (x < 10) {
+      with (yield) {
+        yield;
+        x = foo; // after we fix wrapping, we also need to remember value
+      }
+    }
+    return x;
+  }
+</script>
+<script type="loop with double yield and break">
+  var o = {foo: 5};
+  var send = [,o];
+  var expecting = [undefined, undefined, 5];
+
+  function* g() {
+    var x = 5;
+    while (true) {
+      with (yield) {
+        yield;
+        x = foo; // after we fix wrapping, we also need to remember value
+      }
+      break;
+    }
+    return x;
+  }
+</script>
+<script type="eval" disabled>
+  // meh?
+
+  function* g() {
+    eval('yield?');
+  }
+</script>
+<script type="try yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    try {
+      yield;
+    } catch (e) {
+
+    }
+  }
+</script>
+<script type="catch yield">
+  var expecting = [1];
+
+  function* g() {
+    try {
+    } catch (e) {
+      yield;
+    }
+    return 1;
+  }
+</script>
+<script type="catch thrown yield">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    try {
+      throw 2;
+    } catch (e) {
+      yield;
+    }
+    return 1;
+  }
+</script>
+<script type="catch var yield">
+  var expecting = [2, 1];
+
+  function* g() {
+    try {
+      throw 2;
+    } catch (e) {
+      yield e;
+    }
+    return 1;
+  }
+</script>
+<script type="catch var yield return">
+  var expecting = [2, 5];
+
+  function* g() {
+    try {
+      throw 2;
+    } catch (e) {
+      yield e;
+      return 5;
+    }
+    return 1;
+  }
+</script>
+<script type="finally yield" disabled>
+  // finally is too much work. let's leave it as an exercise for the reader ;)
+
+  function* g() {
+    try {
+    } finally {
+      yield;
+    }
+  }
+</script>
+<script type="switch yield">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (yield) {
+    }
+    return 1;
+  }
+</script>
+<script type="switch yield case 1">
+  var send = [,1];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (yield) {
+      case 1:
+        break;
+        return 2;
+      case 3:
+        break;
+    }
+    return 1;
+  }
+</script>
+<script type="switch yield case 3">
+  var send = [,3];
+  var expecting = [undefined, 4];
+
+  function* g() {
+    switch (yield) {
+      case 1:
+        break;
+        return 2;
+      case 3:
+        return 4;
+        break;
+    }
+    return 1;
+  }
+</script>
+<script type="case arg yield 1">
+  var send = [,1];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (1) {
+      case yield:
+        return 2;
+        break;
+    }
+    return 1;
+  }
+</script>
+<script type="case arg yield 2">
+  var send = [,2];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (1) {
+      case yield:
+        return 2;
+        break;
+    }
+    return 1;
+  }
+</script>
+<script type="case arg yield fall-through 1">
+  var send = [,1];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (1) {
+      case yield:
+      case 3:
+        return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="case arg yield fall-through 2">
+  var send = [,2];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (1) {
+      case yield:
+      case 3:
+        return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="case arg yield fall-through 3">
+  var send = [,1];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (1) {
+      case yield:
+      case 3:
+        return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="case body yield">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (1) {
+      case 1:
+        yield;
+        break;
+    }
+    return 1;
+  }
+</script>
+<script type="case body yield fall-through">
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (1) {
+      case 1:
+        yield;
+      case 3:
+        return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="case double yield">
+  var expecting = [undefined, undefined, 5];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        return 2 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="case skipping double yield">
+  var expecting = [2];
+
+  function* g() {
+    var x = 0;
+    switch (3) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        return 2 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="double case yield 1">
+  var expecting = [undefined, undefined, 6];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        ++x;
+        yield;
+        ++x;
+        return 2 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="double case yield 1">
+  var expecting = [undefined, 4];
+
+  function* g() {
+    var x = 0;
+    switch (3) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        ++x;
+        yield;
+        ++x;
+        return 2 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="default">
+  var expecting = [10];
+
+  function* g() {
+    var x = 0;
+    switch (5) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        ++x;
+        yield;
+        ++x;
+        return 2 + x;
+      default:
+        return 10;
+    }
+    return 1;
+  }
+</script>
+<script type="default yield">
+  var expecting = [undefined, 12];
+
+  function* g() {
+    var x = 0;
+    switch (5) {
+      case 1:
+        yield;
+      case 3:
+        yield;
+        return 2 + x;
+      default:
+        ++x;
+        yield;
+        ++x;
+        return 10 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="weird default yield">
+  var expecting = [undefined, undefined, 6];
+
+  function* g() {
+    var x = 0;
+    switch (5) {
+      case 1:
+        yield;
+      default:
+        ++x;
+        yield;
+        ++x;
+      case 3:
+        ++x;
+        yield;
+        ++x;
+        return 2 + x;
+    }
+    return 1;
+  }
+</script>
+<script type="multi yields in a loop">
+  var expecting = [undefined, undefined, 1];
+
+  function* g() {
+    while (true) {
+      yield;
+      yield;
+      break;
+    }
+    return 1;
+  }
+</script>
+<script type="multi yields in a nested loop">
+  var expecting = [undefined, undefined, 1];
+
+  function* g() {
+    while (true) {
+      while (true) {
+        break;
+      }
+      yield;
+      yield;
+      break;
+    }
+    return 1;
+  }
+</script>
+<script type="block yield followed by statement yield 1">
+  var send = [,true];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    if (false) {
+      yield;
+    }
+    if (yield) {
+      return 1
+    }
+    return 2;
+  }
+</script>
+<script type="block yield followed by statement yield 2">
+  var send = [,false];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    if (false) {
+      yield;
+    }
+    if (yield) {
+      return 1
+    }
+    return 2;
+  }
+</script>
+<script type="block yield followed by statement yield 3">
+  var send = [,,true];
+  var expecting = [undefined, undefined, 1];
+
+  function* g() {
+    if (true) {
+      yield;
+    }
+    if (yield) {
+      return 1
+    }
+    return 2;
+  }
+</script>
+<script type="block yield followed by statement yield 4">
+  var send = [,,false];
+  var expecting = [undefined, undefined, 2];
+
+  function* g() {
+    if (true) {
+      yield;
+    }
+    if (yield) {
+      return 1
+    }
+    return 2;
+  }
+</script>
+<script type="statement if yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    if (yield) ;
+  }
+</script>
+<script type="statement if yield comma before">
+  var send = [,false];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    if (yield, true) return 1;
+    return 2;
+  }
+</script>
+<script type="statement if yield comma after">
+  var send = [,false];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    if (true, yield) return 1;
+    return 2;
+  }
+</script>
+<script type="statement switch yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    switch (yield) {}
+  }
+</script>
+<script type="statement switch yield comma before">
+  var send = [,2];
+  var expecting = [undefined, 3];
+
+  function* g() {
+    switch (yield, 1) {
+      case 1:
+        return 3;
+      case 2:
+        return 4;
+    }
+    return 5;
+  }
+</script>
+<script type="statement switch yield comma after">
+  var send = [,2];
+  var expecting = [undefined, 4];
+
+  function* g() {
+    switch (1, yield) {
+      case 1:
+        return 3;
+      case 2:
+        return 4;
+    }
+    return 5;
+  }
+</script>
+<script type="statement case yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    switch (true) {
+      case yield:
+    }
+  }
+</script>
+<script type="statement case yield comma 1 before">
+  var send = [,true];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (true) {
+      case yield,false:
+        return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="statement case yield comma 1 after">
+  var send = [,true];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    switch (true) {
+      case false, yield:
+        return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="statement case yield comma 2 before">
+  var send = [,false];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (true) {
+      case yield,false:
+        return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="statement case yield comma 2 after">
+  var send = [,false];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    switch (true) {
+      case false, yield:
+        return 1;
+    }
+    return 2;
+  }
+</script>
+<script type="statement while yield">
+  // yield is special in that it needs to repetitively yield
+  var send = [,true,true,false];
+  var expecting = [1, 2, 3, -2];
+
+  function* g() {
+    var x = 0;
+    var y = 0;
+    while (yield ++x) {
+        --y;
+    }
+    return y;
+  }
+</script>
+<script type="statement while yield comma first before">
+  // yield is special in that it needs to repetitively yield
+  var send = [,true];
+  var expecting = [1, 0];
+
+  function* g() {
+    var x = 0;
+    var y = 0;
+    while (yield ++x, false) {
+        --y;
+    }
+    return y;
+  }
+</script>
+<script type="statement while yield comma first after">
+  // yield is special in that it needs to repetitively yield
+  var send = [,true,false];
+  var expecting = [1, 2, -1];
+
+  function* g() {
+    var x = 0;
+    var y = 0;
+    while (false, yield ++x) {
+        --y;
+    }
+    return y;
+  }
+</script>
+<script type="statement while yield comma first before">
+  // yield is special in that it needs to repetitively yield
+  var send = [,true,true,false];
+  var expecting = [1, 0];
+
+  function* g() {
+    var x = 0;
+    var y = 0;
+    while (yield ++x, false) {
+        --y;
+    }
+    return y;
+  }
+</script>
+<script type="statement while yield comma first after">
+  // yield is special in that it needs to repetitively yield
+  var send = [,true,true,false];
+  var expecting = [1, 2, 3, -2];
+
+  function* g() {
+    var x = 0;
+    var y = 0;
+    while (false, yield ++x) {
+        --y;
+    }
+    return y;
+  }
+</script>
+<script type="statement return yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    return yield;
+  }
+</script>
+<script type="statement return yield 5">
+  var send = [,5];
+  var expecting = [undefined, 5];
+
+  function* g() {
+    return yield;
+  }
+</script>
+<script type="statement return yield comma before">
+  var expecting = [undefined, 5];
+
+  function* g() {
+    return yield, 5;
+  }
+</script>
+<script type="statement return yield comma after">
+  var send = [,10];
+  var expecting = [undefined, 10];
+
+  function* g() {
+    return 5, yield;
+  }
+</script>
+<script type="statement throw yield" disabled>
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    throw yield;
+  }
+</script>
+<script type="statement throw yield comma before" disabled>
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    throw yield, 5;
+  }
+</script>
+<script type="statement throw yield comma after" disabled>
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    throw 5, yield;
+  }
+</script>
+<script type="statement var yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    var foo = yield;
+  }
+</script>
+<script type="statement double var yield">
+  var send = [,5];
+  var expecting = [undefined, 15];
+
+  function* g() {
+    var foo = yield, bar = 10;
+    return foo + bar;
+  }
+</script>
+<script type="statement for1 yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    for (yield;false;);
+  }
+</script>
+<script type="statement for2 yield">
+  var send = [,false];
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    for (;yield;);
+  }
+</script>
+<script type="statement for2 yield comma">
+  var send = [,false];
+  var expecting = [undefined, 0];
+
+  function* g() {
+    for (var x=0;yield,false;++x);
+    return x;
+  }
+</script>
+<script type="statement for3 yield">
+  var send = [,false];
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    for (var x=true;x;x=yield);
+  }
+</script>
+<script type="statement for-in-lhs yield" disabled>
+  // requires parser fix
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    for (var x=yield in {a:1});
+  }
+</script>
+<script type="statement for-in-rhs yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    for (var x in yield);
+  }
+</script>
+<script type="statement do yield">
+  var send = [,false]
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    do { } while (yield);
+  }
+</script>
+<script type="statement do yield comma">
+  var send = [,true, true, false];
+  var expecting = [undefined, 1];
+
+  function* g() {
+    var x = 0;
+    do { ++x; } while (yield, false);
+    return x;
+  }
+</script>
+<script type="statement block yield">
+  var expecting = [undefined, undefined];
+
+  function* g() {
+    {yield;}
+  }
+</script>
+<script type="switch in loop, break out before">
+  var expecting = [1];
+
+  function* g() {
+    while (true) {
+      break;
+      switch (yield) {
+      }
+      return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="switch in loop, break in">
+  var expecting = [undefined, 2];
+
+  function* g() {
+    while (true) {
+      switch (yield) {
+        default:
+          break;
+      }
+      return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="switch in loop, break after">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    while (true) {
+      switch (yield) {
+        default:
+      }
+      break;
+      return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="switch in loop, continue check">
+  var expecting = [undefined, 1];
+
+  function* g() {
+    var c = true;
+    while (c) {
+      switch (yield) {
+        default:
+          c = false;
+          continue;
+      }
+      return 2;
+    }
+    return 1;
+  }
+</script>
+<script type="comma statement yield">
+  var expecting = [2, undefined];
+
+  function* g() {
+    true,yield 2;
+  }
+</script>
+<script type="comma statement yield in block">
+  var expecting = [2, undefined];
+
+  function* g() {
+    if (true) true,yield 2;
+  }
+</script>
+<script type="comma statement yield in block yield 1">
+  var send = [,true,3];
+  var expecting = [undefined, 2, 3];
+
+  function* g() {
+    if (yield) return true,yield 2;
+    return 4;
+  }
+</script>
+<script type="comma statement yield in block yield 2">
+  var send = [,false];
+  var expecting = [undefined, 4];
+
+  function* g() {
+    if (yield) return true,yield 2;
+    return 4;
+  }
+</script>
+<script type="for yields">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    4,         3,         2,        5];
+
+  function* g() {
+    for (yield 1; yield 2; yield 3) yield 4;
+    console.log(5);
+    return 5;
+  }
+</script>
+<script type="for yields as while simple">
+  var send = [,true, undefined, false];
+  var expecting = [1, 2, 1, 3];
+
+  function* g() {
+    while (yield 1){
+      yield 2;
+    }
+    return 3;
+  }
+</script>
+<script type="for yields as while single">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    3,         2,         5];
+
+  function* g() {
+    yield 1;
+    while (yield 2){
+      yield 3;
+    }
+    return 5;
+  }
+</script>
+<script type="for yields comma 1">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    4,         3,         2,        5];
+
+  function* g() {
+    for (true,yield 1; yield 2; yield 3) yield 4;
+    return 5;
+  }
+</script>
+<script type="for yields comma 2">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    4,         3,         2,        5];
+
+  function* g() {
+    for (yield 1; true,yield 2; yield 3) yield 4;
+    console.log(5);
+    return 5;
+  }
+</script>
+<script type="for yields comma 3">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    4,         3,         2,        5];
+
+  function* g() {
+    for (yield 1; yield 2; true,yield 3) yield 4;
+    console.log(5);
+    return 5;
+  }
+</script>
+<script type="for yields comma 4">
+  var send =      [,undefined, true, undefined, undefined, false];
+  var expecting = [ 1,         2,    4,         3,         2,        5];
+
+  function* g() {
+    for (yield 1; yield 2; yield 3) true,yield 4;
+    console.log(5);
+    return 5;
+  }
+</script>
+<script type="switch break">
+  var expecting = [undefined, 2];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        break;
+      case 2:
+        ++x;
+        break;
+    }
+    return x;
+  }
+</script>
+<script type="nested switch break before">
+  var expecting = [undefined, undefined, 4];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 1:
+        switch (1) {
+          case 1:
+            ++x;
+            yield;
+            ++x;
+            break;
+          case 2:
+            ++x;
+            break;
+        }
+        ++x;
+        yield;
+        ++x;
+        break;
+      case 2:
+        ++x;
+        break;
+    }
+    return x;
+  }
+</script>
+<script type="nested switch break after">
+  var expecting = [undefined, undefined, 4];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        switch (1) {
+          case 1:
+            ++x;
+            yield;
+            ++x;
+            break;
+          case 2:
+            ++x;
+            break;
+        }
+        break;
+      case 2:
+        ++x;
+        break;
+    }
+    return x;
+  }
+</script>
+<script type="nested loops break">
+  var expecting = [undefined, 4];
+
+  function* g() {
+    var x = 0;
+    while (true) {
+        ++x;
+        while (true) {
+          ++x;
+          yield;
+          ++x;
+          break;
+          x += 10;
+        }
+        ++x;
+        break;
+        x += 100;
+    }
+    return x;
+  }
+</script>
+<script type="funcexpr in yield function">
+  var expecting = [undefined, 5];
+
+  function* g() {
+    yield;
+    var f = function(){ return 5; };
+    return f();
+  }
+</script>
+<script type="yielding a function literal">
+  var expecting = ['to be replaced', undefined];
+
+  function* g() {
+    yield expecting[0] = function(){};
+  }
+</script>
+<script type="IIF yield">
+  var send = [,5];
+  var expecting = [undefined, 10];
+
+  function* g() {
+    return (function(n){ return n*2; })(yield);
+  }
+</script>
+<script type="IIF yield, no parens">
+  var send = [,5];
+  var expecting = [undefined, 10];
+
+  function* g() {
+    return function(n){ return n*2; }(yield);
+  }
+</script>
+<script type="break in while, double yield">
+  var send = [,5];
+  var expecting = [undefined, undefined, 3];
+
+  function* g() {
+    var x = 0;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      yield;
+      ++x;
+      break;
+      x = -400;
+    }
+    return x;
+  }
+</script>
+<script type="break in while, preceeding yield">
+  var send = [,5];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    yield;
+    var x = 0;
+    while (true) {
+      ++x;
+      break;
+      x = -400;
+    }
+    ++x;
+    return x;
+  }
+</script>
+<script type="break in while, succeeding yield">
+  var send = [,5];
+  var expecting = [undefined, 2];
+
+  function* g() {
+    var x = 0;
+    while (true) {
+      ++x;
+      break;
+      x = -400;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="break in while, in and after yield">
+  // tests that appending a loop after a partial loop only happens if the yield happens in/before that loop
+  var send = [,5];
+  var expecting = [undefined, undefined, 5];
+
+  function* g() {
+    while (true) {
+      yield;
+      break;
+    }
+    yield;
+    return 5;
+  }
+</script>
+<script type="break in while, multi yield">
+  var send = [,5];
+  var expecting = [undefined, undefined, undefined, undefined, 4];
+
+  function* g() {
+    yield;
+    var x = 0;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      yield;
+      ++x;
+      break;
+      x = -400;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="switch in loop break">
+  var send = [,5];
+  var expecting = [undefined, undefined, undefined, undefined, undefined, 7];
+
+  function* g() {
+    yield;
+    var x = 0;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      switch (1) {
+        case 1:
+          ++x;
+          yield;
+          ++x;
+          break;
+          x = -100;
+        case 2:
+          x = -200;
+          break;
+          x = -300;
+      }
+      ++x;
+      yield;
+      ++x;
+      break;
+      x = -400;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="switch in loop continue break">
+  var expecting = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 13];
+
+  function* g() {
+    yield;
+    var x = 0;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      switch (1) {
+        case 1:
+          ++x;
+          yield;
+          ++x;
+          break;
+          x = -100;
+        case 2:
+          x = -200;
+          break;
+          x = -300;
+      }
+      ++x;
+      yield;
+      ++x;
+
+      if (x < 10) continue;
+
+      break;
+      x = -400;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="loop in switch break">
+  var expecting = [undefined, undefined, undefined, undefined, 7];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 0:
+        ++x;
+        yield;
+        ++x;
+        break;
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        while (true) {
+          ++x;
+          yield;
+          ++x;
+          break;
+        }
+        ++x;
+        yield;
+        ++x;
+        break;
+        x = -100;
+      case 2:
+        x = -200;
+        break;
+        x = -300;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="loop in switch break continue">
+  var expecting = [undefined, undefined, undefined, undefined, undefined, 9];
+
+  function* g() {
+    var x = 0;
+    switch (1) {
+      case 0:
+        ++x;
+        yield;
+        ++x;
+        break;
+      case 1:
+        ++x;
+        yield;
+        ++x;
+        while (true) {
+          ++x;
+          yield;
+          ++x;
+          if (x < 5) continue;
+          break;
+        }
+        ++x;
+        yield;
+        ++x;
+        break;
+        x = -100;
+      case 2:
+        x = -200;
+        break;
+        x = -300;
+    }
+    ++x;
+    yield;
+    return x;
+  }
+</script>
+<script type="nested loop break, multi yields, 1">
+  var expecting = [undefined, undefined, 5];
+
+  function* g() {
+    var x = 1;
+    yield;
+    ++x;
+    while (true) {
+      ++x;
+      break;
+      ++x;
+      yield;
+      ++x;
+      var x = 0;
+      while (x < 5) {
+        ++x;
+        yield;
+        ++x;
+      }
+      ++x;
+      yield;
+      ++x;
+    }
+    ++x;
+    yield;
+    ++x;
+    return x;
+  }
+</script>
+<script type="nested loop break, multi yields, 2">
+  var expecting = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 17];
+
+  function* g() {
+    var x = 1;
+    yield;
+    ++x;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      var y = 0;
+      while (y < 5) {
+        ++x;
+        yield;
+        ++x;
+        ++y;
+      }
+      ++x;
+      break;
+      ++x;
+      yield;
+      ++x;
+    }
+    ++x;
+    yield;
+    ++x;
+    return x;
+  }
+</script>
+<script type="nested loop break, multi yields, 3">
+  var expecting = [undefined, undefined, undefined, undefined, 9];
+
+  function* g() {
+    var x = 1;
+    yield;
+    ++x;
+    while (true) {
+      ++x;
+      yield;
+      ++x;
+      var y = 0;
+      while (y < 5) {
+        ++x;
+        yield;
+        ++x;
+        break;
+        ++y;
+      }
+      ++x;
+      break;
+      ++x;
+      yield;
+      ++x;
+    }
+    ++x;
+    yield;
+    ++x;
+    return x;
+  }
+</script>
+<script type="nested loop break, multi yields, 3">
+  var expecting = [undefined, undefined, undefined, undefined, undefined, 10];
+
+  function* g() {
+    var x = 1;
+    yield;
+    ++x;
+    while (x < 6) {
+      ++x;
+      yield;
+      ++x;
+      var y = 0;
+      while (y < 5) {
+        ++x;
+        yield;
+        ++x;
+        break;
+        ++y;
+      }
+      ++x;
+      yield;
+      ++x;
+    }
+    ++x;
+    yield;
+    ++x;
+    return x;
+  }
+</script>
+<script type="nested loop continue regression">
+  var expecting = [undefined, 6];
+
+  function* g() {
+    var x = 1;
+    yield;
+    while (x < 6) {
+      ++x;
+      continue;
+      while (y < 5) {
+        yield;
+      }
+    }
+    return x;
+  }
+</script>
+<script type="nested loop continue, multi yields, 3">
+  var expecting = [1, 2, 3, 3, 3, 4, 5, 16];
+
+  function* g() {
+    var x = 1;
+    yield 1;
+    ++x;
+    while (x < 6) {
+      ++x;
+      yield 2;
+      ++x;
+      var y = 0;
+      while (y < 5) {
+        ++y;
+        ++x;
+        if (y < 3) continue;
+        yield 3;
+        ++x;
+      }
+      ++x;
+      yield 4;
+      ++x;
+    }
+    ++x;
+    yield 5;
+    ++x;
+    return x;
+  }
+</script>
+<script type="nested loop double continue, multi yields, 3">
+  var expecting = [1, 2, 3, 3, 3, 5, 14];
+
+  function* g() {
+    var x = 1;
+    yield 1;
+    ++x;
+    while (x < 6) {
+      ++x;
+      yield 2;
+      ++x;
+      var y = 0;
+      while (y < 5) {
+        ++y;
+        ++x;
+        if (y < 3) continue;
+        yield 3;
+        ++x;
+      }
+      if (x > 3) continue;
+      ++x;
+      yield 4;
+      ++x;
+    }
+    ++x;
+    yield 5;
+    ++x;
+    return x;
+  }
+</script>
+<script type="for-in inc inheritance">
+  var expecting = ['foo', undefined];
+
+  function* g() {
+    function A() {}
+    A.prototype.foo = 5;
+    for (var key in new A) yield key;
+  }
+</script>
+<script type="func call arg">
+  var send = [, 30];
+  var expecting = [undefined, 30];
+
+  function* g() {
+    return Math.max(yield, 20);
+  }
+</script>
+<script type="addition">
+  var send = [, 30];
+  var expecting = [undefined, 35];
+
+  function* g() {
+    return 5 + yield;
+  }
+</script>
+<script type="addition yield arg">
+  var send = [, 30];
+  var expecting = [10, 35];
+
+  function* g() {
+    return 5 + yield 10;
+  }
+</script>
+<script type="addition yield arg parens">
+  var send = [, 30];
+  var expecting = [10, 35];
+
+  function* g() {
+    return 5 + (yield 10);
+  }
+</script>
+<script type="addition yield arg parens before after">
+  var send = [, 30];
+  var expecting = [10, 55];
+
+  function* g() {
+    return 5 + (yield 10) + 20;
+  }
+</script>
+
+
+<!-- not covered:
+labels
+asi
+-->
+<footer>(c) 2014, Peter van der Zee, <a href="http://twitter.com/kuvos/">@kuvos</a>, <a href="http://qfox.nl/">qfox.nl</a>. Check <a href="http://github.com/qfox/unyield/">this project on github</a></footer>

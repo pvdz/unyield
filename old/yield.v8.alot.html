@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Yield</title>
+  </head>
+  <body>
+    <script src="uni.js"></script>
+    <script src="tok.js"></script>
+    <script src="par.js"></script>
+
+    input:
+    <hr>
+    <script id=A type="example" style="display:block; white-space:pre; font-family:monospace;">
+ function* g() {
+    while (yield 1){
+      yield 2;
+    }
+    return 3;
+  }
+    </script>
+    <hr>
+    output:
+    <hr>
+    <script id=B type="output" style="display:block; white-space:pre; font-family:monospace;" contenteditable></script>
+    <script src="yield.js"></script>
+    <script>
+      B.textContent = yieldify(A.textContent);
+    </script>
+  </body>
+</html>
